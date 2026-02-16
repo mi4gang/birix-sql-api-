@@ -10,13 +10,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Конфигурация подключения к MySQL
+// Конфигурация подключения к MySQL (без привязки к конкретной БД)
 const dbConfig = {
   host: process.env.DB_HOST,
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -43,92 +42,66 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Получить информацию о БД
-app.get('/database-info', async (req, res) => {
+// Получить список всех баз данных
+app.get('/databases', async (req, res) => {
   try {
     const [databases] = await pool.query('SHOW DATABASES');
-    const [currentDb] = await pool.query('SELECT DATABASE() as db');
-    const [tables] = await pool.query('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()');
-    
-    res.json({ 
-      success: true,
-      currentDatabase: currentDb[0].db,
-      allDatabases: databases.map(row => Object.values(row)[0]),
-      tablesCount: tables.length,
-      tables: tables.map(row => row.TABLE_NAME)
-    });
+    const dbNames = databases.map(row => Object.values(row)[0]);
+    res.json({ success: true, count: dbNames.length, databases: dbNames });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Получить список всех таблиц
-app.get('/tables', async (req, res) => {
+// Получить таблицы из конкретной базы
+app.get('/database/:dbName/tables', async (req, res) => {
   try {
-    const [tables] = await pool.query('SHOW TABLES');
+    const { dbName } = req.params;
+    const [tables] = await pool.query(`SHOW TABLES FROM \`${dbName}\``);
     const tableNames = tables.map(row => Object.values(row)[0]);
-    res.json({ 
-      success: true, 
-      count: tableNames.length,
-      tables: tableNames 
-    });
+    res.json({ success: true, database: dbName, count: tableNames.length, tables: tableNames });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Получить структуру таблицы
-app.get('/table/:tableName/structure', async (req, res) => {
+// Получить данные из таблицы конкретной базы
+app.get('/database/:dbName/table/:tableName', async (req, res) => {
   try {
-    const { tableName } = req.params;
-    const [columns] = await pool.query(`DESCRIBE ${tableName}`);
-    res.json({ 
-      success: true, 
-      table: tableName,
-      columns 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Получить данные из таблицы
-app.get('/table/:tableName', async (req, res) => {
-  try {
-    const { tableName } = req.params;
+    const { dbName, tableName } = req.params;
     const limit = req.query.limit || 100;
     const offset = req.query.offset || 0;
     
     const [rows] = await pool.query(
-      `SELECT * FROM ${tableName} LIMIT ? OFFSET ?`,
+      `SELECT * FROM \`${dbName}\`.\`${tableName}\` LIMIT ? OFFSET ?`,
       [parseInt(limit), parseInt(offset)]
     );
     
     const [countResult] = await pool.query(
-      `SELECT COUNT(*) as total FROM ${tableName}`
+      `SELECT COUNT(*) as total FROM \`${dbName}\`.\`${tableName}\``
     );
     
     res.json({ 
-      success: true,
-      table: tableName,
+      success: true, 
+      database: dbName, 
+      table: tableName, 
       total: countResult[0].total,
-      count: rows.length,
+      count: rows.length, 
       data: rows 
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Получить структуру таблицы
+app.get('/database/:dbName/table/:tableName/structure', async (req, res) => {
+  try {
+    const { dbName, tableName } = req.params;
+    const [columns] = await pool.query(`DESCRIBE \`${dbName}\`.\`${tableName}\``);
+    res.json({ success: true, database: dbName, table: tableName, columns });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -159,103 +132,25 @@ app.post('/query', async (req, res) => {
   }
 });
 
-// Специфичные endpoints для основных таблиц
-app.get('/deals', async (req, res) => {
-  try {
-    const limit = req.query.limit || 100;
-    const [rows] = await pool.query(
-      `SELECT * FROM deal LIMIT ?`,
-      [parseInt(limit)]
-    );
-    res.json({ 
-      success: true,
-      count: rows.length,
-      data: rows 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-app.get('/companies', async (req, res) => {
-  try {
-    const limit = req.query.limit || 100;
-    const [rows] = await pool.query(
-      `SELECT * FROM company LIMIT ?`,
-      [parseInt(limit)]
-    );
-    res.json({ 
-      success: true,
-      count: rows.length,
-      data: rows 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-app.get('/contacts', async (req, res) => {
-  try {
-    const limit = req.query.limit || 100;
-    const [rows] = await pool.query(
-      `SELECT * FROM contact LIMIT ?`,
-      [parseInt(limit)]
-    );
-    res.json({ 
-      success: true,
-      count: rows.length,
-      data: rows 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-app.get('/leads', async (req, res) => {
-  try {
-    const limit = req.query.limit || 100;
-    const [rows] = await pool.query(
-      `SELECT * FROM lead LIMIT ?`,
-      [parseInt(limit)]
-    );
-    res.json({ 
-      success: true,
-      count: rows.length,
-      data: rows 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
 // Корневой маршрут
 app.get('/', (req, res) => {
   res.json({
     message: 'Bitrix24 MySQL API',
-    version: '1.0.0',
+    version: '2.0.0',
+    description: 'REST API для доступа к любым MySQL базам данных',
     endpoints: {
-      health: 'GET /health',
-      databaseInfo: 'GET /database-info',
-      tables: 'GET /tables',
-      tableStructure: 'GET /table/:tableName/structure',
-      tableData: 'GET /table/:tableName?limit=100&offset=0',
-      query: 'POST /query',
-      deals: 'GET /deals?limit=100',
-      companies: 'GET /companies?limit=100',
-      contacts: 'GET /contacts?limit=100',
-      leads: 'GET /leads?limit=100'
+      health: 'GET /health - Проверка подключения',
+      databases: 'GET /databases - Получить список всех БД',
+      tables: 'GET /database/:dbName/tables - Получить таблицы БД',
+      tableData: 'GET /database/:dbName/table/:tableName?limit=100&offset=0 - Получить данные из таблицы',
+      tableStructure: 'GET /database/:dbName/table/:tableName/structure - Получить структуру таблицы',
+      query: 'POST /query - Выполнить SELECT запрос (body: {query: "SELECT ..."})'
+    },
+    examples: {
+      listDatabases: '/databases',
+      listTables: '/database/default_db/tables',
+      getData: '/database/default_db/table/deals?limit=50&offset=0',
+      getStructure: '/database/default_db/table/deals/structure'
     }
   });
 });
@@ -263,5 +158,6 @@ app.get('/', (req, res) => {
 // Запуск сервера
 app.listen(PORT, () => {
   console.log(`🚀 Bitrix MySQL API running on port ${PORT}`);
-  console.log(`📊 Database: ${dbConfig.database}@${dbConfig.host}`);
+  console.log(`📊 Connected to MySQL: ${dbConfig.host}:${dbConfig.port}`);
+  console.log(`🔗 API is ready to access any database`);
 });
