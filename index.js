@@ -43,6 +43,28 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Получить информацию о БД
+app.get('/database-info', async (req, res) => {
+  try {
+    const [databases] = await pool.query('SHOW DATABASES');
+    const [currentDb] = await pool.query('SELECT DATABASE() as db');
+    const [tables] = await pool.query('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()');
+    
+    res.json({ 
+      success: true,
+      currentDatabase: currentDb[0].db,
+      allDatabases: databases.map(row => Object.values(row)[0]),
+      tablesCount: tables.length,
+      tables: tables.map(row => row.TABLE_NAME)
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Получить список всех таблиц
 app.get('/tables', async (req, res) => {
   try {
@@ -225,6 +247,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       health: 'GET /health',
+      databaseInfo: 'GET /database-info',
       tables: 'GET /tables',
       tableStructure: 'GET /table/:tableName/structure',
       tableData: 'GET /table/:tableName?limit=100&offset=0',
